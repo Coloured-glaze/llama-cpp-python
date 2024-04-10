@@ -11,8 +11,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04]
-        cibw_archs: ["aarch64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
+        os: ["ubuntu-22.04-arm64"]
+        cibw_archs: ["aarch64"]  # Define 'cibw_archs' as part of the job's strategy matrix
 
     steps:
       - uses: actions/checkout@v3
@@ -33,6 +33,7 @@ jobs:
         uses: pypa/cibuildwheel@v2.16.5
         env:
           # disable repair
+          CIBW_BUILD: "cp310-*"
           CIBW_REPAIR_WHEEL_COMMAND: ""
           CIBW_ARCHS: ${{ matrix.cibw_archs }}
         with:
