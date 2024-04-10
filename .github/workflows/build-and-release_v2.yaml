@@ -12,15 +12,22 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: "ubuntu-20.04-arm64"
-            arch: "aarch64"
-          - os: "ubuntu-20.04"
+          - os: "ubuntu-22.04"
+            arch: "x86_64"
+          - os: "ubuntu-22.04"
             arch: "aarch64"
 
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: "recursive"
+
+      # Set up QEMU for ARM64 architecture
+      - name: Set up QEMU
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: arm64
 
       # Used to host cibuildwheel
       - uses: actions/setup-python@v3
