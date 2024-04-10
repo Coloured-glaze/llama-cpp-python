@@ -5,6 +5,12 @@ on: workflow_dispatch
 permissions:
   contents: write
 
+# Add the 'cibw_archs' matrix for each platform
+matrix:
+  include:
+    - os: ubuntu-20.04
+      cibw_archs: "aarch64 x86_64"  # For Linux, 'auto' will detect and build for multiple architectures (e.g., x86_64, i686, aarch64)
+
 jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
@@ -41,12 +47,6 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           path: ./wheelhouse/*.whl
-
-# Add the 'cibw_archs' matrix for each platform
-matrix:
-  include:
-    - os: ubuntu-20.04
-      cibw_archs: "aarch64 x86_64"  # For Linux, 'auto' will detect and build for multiple architectures (e.g., x86_64, i686, aarch64)
 
   build_sdist:
     name: Build source distribution
