@@ -40,9 +40,10 @@ jobs:
         uses: pypa/cibuildwheel@v2.16.5
         env:
           # disable repair
-          CIBW_BUILD: "cp39-manylinux_* cp310-manylinux_*"
           CIBW_REPAIR_WHEEL_COMMAND: ""
-          CIBW_ARCHS: ${{ matrix.cibw_archs }}
+          CIBW_BUILD: "cp39-manylinux_* cp310-manylinux_*"
+          CIBW_ARCHS: ${{ matrix.cibw_archs }}   
+          CMAKE_ARGS: "-DLLAMA_NATIVE=OFF -DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS"
         with:
           package-dir: .
           output-dir: wheelhouse 
