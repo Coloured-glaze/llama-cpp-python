@@ -15,16 +15,16 @@ jobs:
         cibw_archs: ["aarch64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
 
     steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: "recursive"
-
       # Set up QEMU for ARM64 architecture
       - name: Set up QEMU
-        if: matrix.arch == 'aarch64'
+        if: matrix.cibw_archs == 'aarch64'
         uses: docker/setup-qemu-action@v2
         with:
           platforms: arm64
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: "recursive"
         
       # Used to host cibuildwheel
       - uses: actions/setup-python@v3
@@ -49,7 +49,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          path: ./wheelhouse/*.whl 
+          path: ./wheelhouse/*.whl
 
   build_sdist:
     name: Build source distribution
