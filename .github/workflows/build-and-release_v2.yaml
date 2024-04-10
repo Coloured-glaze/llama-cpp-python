@@ -12,12 +12,12 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        cibw_archs: ["arm64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
+        cibw_archs: ["aarch64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
 
     steps:
       # Set up QEMU for ARM64 architecture
       - name: Set up QEMU
-        if: matrix.cibw_archs == 'arm64'
+        if: matrix.cibw_archs == 'aarch64'
         uses: docker/setup-qemu-action@v2
         with:
           platforms: arm64
