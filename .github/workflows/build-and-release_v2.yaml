@@ -7,17 +7,17 @@ permissions:
 
 jobs:
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.os }} ${{ matrix.cibw_archs }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        cibw_archs: ["aarch64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
+        cibw_archs: ["arm64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
 
     steps:
       # Set up QEMU for ARM64 architecture
       - name: Set up QEMU
-        if: matrix.cibw_archs == 'aarch64'
+        if: matrix.cibw_archs == 'arm64'
         uses: docker/setup-qemu-action@v2
         with:
           platforms: arm64
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           path: ./dist/*.tar.gz
-
+  
   release:
     name: Release
     needs: [build_wheels, build_sdist]
@@ -83,8 +83,12 @@ jobs:
         with:
           name: artifact
           path: dist
+      - id: tag
+        run: |
+          echo "::set-output name=release_tag::$(date +"%Y.%m.%d_%H-%M")"
       - uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
