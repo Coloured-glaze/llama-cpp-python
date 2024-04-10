@@ -11,11 +11,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        include:
-          - os: "ubuntu-22.04"
-            arch: "x86_64"
-          - os: "ubuntu-22.04"
-            arch: "aarch64"
+        os: [ubuntu-22.04]
+        cibw_archs: ["aarch64", "x86_64"]  # Define 'cibw_archs' as part of the job's strategy matrix
 
     steps:
       - uses: actions/checkout@v3
@@ -28,7 +25,7 @@ jobs:
         uses: docker/setup-qemu-action@v2
         with:
           platforms: arm64
-
+        
       # Used to host cibuildwheel
       - uses: actions/setup-python@v3
         with:
@@ -43,7 +40,7 @@ jobs:
         uses: pypa/cibuildwheel@v2.16.5
         env:
           # disable repair
-          CIBW_BUILD: "cp310-*"
+          CIBW_BUILD: "cp39-* cp310-*"
           CIBW_REPAIR_WHEEL_COMMAND: ""
           CIBW_ARCHS: ${{ matrix.cibw_archs }}
         with:
