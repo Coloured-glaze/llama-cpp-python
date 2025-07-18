@@ -132,7 +132,12 @@ jobs:
         run: |
           $cudaVersion = $env:CUDAVER
           mamba install -y 'cuda' -c nvidia/label/cuda-$cudaVersion
+          
+          # 关键修复：安装新版CMake
+          mamba install -y cmake=3.29.4
+          
           python -m pip install build wheel
+          python -m pip install --force-reinstall scikit-build-core
 
       - name: Build Wheel
         run: |
@@ -149,6 +154,14 @@ jobs:
           $env:CMAKE_ARGS = '-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=70'
           $env:CMAKE_ARGS = "-DGGML_CUDA_FORCE_MMQ=ON $env:CMAKE_ARGS"
           $env:CMAKE_ARGS = $env:CMAKE_ARGS + ' -DGGML_AVX2=off -DGGML_FMA=off -DGGML_F16C=off'
+          
+          # 关键修复：设置新CMake路径
+          $env:PATH = "$env:CONDA_PREFIX\Library\bin;$env:PATH"
+          
+          # 验证工具链
+          Write-Output "--- TOOLCHAIN VERSIONS ---"
+          cmake --version
+          nvcc --version
           
           # 构建 wheel
           python -m build --wheel
