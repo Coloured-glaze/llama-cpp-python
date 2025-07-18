@@ -21,7 +21,7 @@ jobs:
         id: set-matrix
         run: |
           $matrix = @{
-              'os' = @('windows-2025')
+              'os' = @('windows-latest')
               'pyver' = @("3.10")
               'cuda' = @("12.1.1") #, "12.5.1", "12.6.1")
               'releasetag' = @("basic")
@@ -44,12 +44,9 @@ jobs:
       AVXVER: ${{ matrix.releasetag }}
 
     steps:
-      - name: Add MSBuild to PATH
+      - name: Setup MSVC
         if: runner.os == 'Windows'
-        uses: microsoft/setup-msbuild@v2
-        with:
-          # vs-version: '[17.1,17.9)'
-          msbuild-architecture: x64
+        uses: ilammy/msvc-dev-cmd@v1.13.0
 
       - uses: actions/checkout@v4
         with:
@@ -80,20 +77,53 @@ jobs:
       - name: Get Visual Studio Integration
         if: runner.os == 'Windows' && steps.vs-integration-cache.outputs.cache-hit != 'true'
         run: |
-          if ($env:CUDAVER -eq '12.1.1') {$x = '12.1.0'} else {$x = $env:CUDAVER}
+          if ($env:CUDAVER -eq '12.1.1') {
+              $x = '12.1.0'
+          } else {
+              $x = $env:CUDAVER
+          }
+          
           $links = (Invoke-RestMethod 'https://raw.githubusercontent.com/Jimver/cuda-toolkit/master/src/links/windows-links.ts').Trim().split().where({$_ -ne ''})
-          for ($i=$q=0;$i -lt $links.count -and $q -lt 2;$i++) {if ($links[$i] -eq "'$x',") {$q++}}
-          Invoke-RestMethod $links[$i].Trim("'") -OutFile 'cudainstaller.zip'
+          for ($i=$q=0; $i -lt $links.count -and $q -lt 2; $i++) {
+              if ($links[$i] -eq "'$x',") {
+                  $q++
+              }
+          }
+          
+          $downloadUrl = $links[$i].Trim("'")
+          Write-Output "Downloading CUDA integration from: $downloadUrl"
+          
+          Invoke-RestMethod $downloadUrl -OutFile 'cudainstaller.zip'
           & 'C:\Program Files\7-Zip\7z.exe' e cudainstaller.zip -oMSBuildExtensions -r *\MSBuildExtensions\* > $null
           Remove-Item 'cudainstaller.zip'
 
       - name: Install Visual Studio Integration
         if: runner.os == 'Windows'
         run: |
-          $y = (gi '.\MSBuildExtensions').fullname + '\*'
-          (gi 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Microsoft\VC\*\BuildCustomizations').fullname.foreach({cp $y $_})
-          $cupath = 'CUDA_PATH_V' + $env:CUDAVER.Remove($env:CUDAVER.LastIndexOf('.')).Replace('.','_')
-          echo "$cupath=$env:CONDA_PREFIX" >> $env:GITHUB_ENV
+          # 动态查找 Visual Studio BuildCustomizations 目录
+          $vsPath = vswhere -latest -property installationPath
+          if (-not $vsPath) {
+              Write-Error "Visual Studio installation not found"
+              exit 1
+          }
+          
+          # 查找 BuildCustomizations 目录
+          $buildCustomizations = Get-ChildItem -Path "$vsPath\MSBuild\Microsoft\VC" -Recurse -Directory -Filter "BuildCustomizations" | Select-Object -First 1
+          if (-not $buildCustomizations) {
+              Write-Error "BuildCustomizations directory not found in Visual Studio installation"
+              exit 1
+          }
+          
+          # 复制文件
+          $sourceDir = (Get-Item '.\MSBuildExtensions').FullName
+          Copy-Item "$sourceDir\*" $buildCustomizations.FullName -Force
+          Write-Output "Copied CUDA integration files to: $($buildCustomizations.FullName)"
+          
+          # 设置 CUDA 环境变量
+          $cudaMainVersion = $env:CUDAVER.Substring(0, $env:CUDAVER.LastIndexOf('.'))
+          $cudaEnvVar = "CUDA_PATH_V" + $cudaMainVersion.Replace('.', '_')
+          Write-Output "$cudaEnvVar=$env:CONDA_PREFIX" >> $env:GITHUB_ENV
+          Write-Output "Set $cudaEnvVar=$env:CONDA_PREFIX"
 
       - name: Install Dependencies
         env:
@@ -106,33 +136,30 @@ jobs:
 
       - name: Build Wheel
         run: |
-          $cudaVersion = $env:CUDAVER.Remove($env:CUDAVER.LastIndexOf('.')).Replace('.','')
+          # 正确提取 CUDA 主版本 (12.1)
+          $cudaMainVersion = $env:CUDAVER.Substring(0, $env:CUDAVER.LastIndexOf('.'))
+          
+          # 设置环境变量
           $env:CUDA_PATH = $env:CONDA_PREFIX
           $env:CUDA_HOME = $env:CONDA_PREFIX
           $env:CUDA_TOOLKIT_ROOT_DIR = $env:CONDA_PREFIX
-          if ($IsLinux) {
-            $env:LD_LIBRARY_PATH = $env:CONDA_PREFIX + '/lib:' + $env:LD_LIBRARY_PATH
-          }
+          
+          # 配置 CMAKE 参数
           $env:VERBOSE = '1'
           $env:CMAKE_ARGS = '-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=70'
           $env:CMAKE_ARGS = "-DGGML_CUDA_FORCE_MMQ=ON $env:CMAKE_ARGS"
-          # if ($env:AVXVER -eq 'AVX') {
           $env:CMAKE_ARGS = $env:CMAKE_ARGS + ' -DGGML_AVX2=off -DGGML_FMA=off -DGGML_F16C=off'
-          # }
-          # if ($env:AVXVER -eq 'AVX512') {
-          #  $env:CMAKE_ARGS = $env:CMAKE_ARGS + ' -DGGML_AVX512=on'
-          # }
-          # if ($env:AVXVER -eq 'basic') {
-          #  $env:CMAKE_ARGS = $env:CMAKE_ARGS + ' -DGGML_AVX=off -DGGML_AVX2=off -DGGML_FMA=off -DGGML_F16C=off'
-          # }
+          
+          # 构建 wheel
           python -m build --wheel
-          # write the build tag to the output
-          Write-Output "CUDA_VERSION=$cudaVersion" >> $env:GITHUB_ENV
+          
+          # 保存 CUDA 版本用于后续步骤
+          Write-Output "CUDA_VERSION=$cudaMainVersion" >> $env:GITHUB_ENV
+          Write-Output "Using CUDA version: $cudaMainVersion for tagging"
 
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          # Set tag_name to <tag>-cu<cuda_version>
           tag_name: ${{ github.ref_name }}-cu${{ env.CUDA_VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
