@@ -5,6 +5,30 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      cuda_version:
+        description: 'CUDA version'
+        required: true
+        default: '12.1.1'
+        type: string
+      python_version:
+        description: 'Python version'
+        required: true
+        default: '3.10'
+        type: string
+      os_type:
+        description: 'Operating System'
+        required: true
+        default: 'windows-latest'
+        type: choice
+        options:
+          - 'windows-latest'
+          - 'ubuntu-latest'
+      release_tag:
+        description: 'Release tag'
+        required: true
+        default: 'basic'
+        type: string
 
 jobs:
   define_matrix:
@@ -20,11 +44,29 @@ jobs:
       - name: Define Job Output
         id: set-matrix
         run: |
+          $osType = "${{ github.event.inputs.os_type }}"
+          $pyVer = "${{ github.event.inputs.python_version }}"
+          $cudaVer = "${{ github.event.inputs.cuda_version }}"
+          $relTag = "${{ github.event.inputs.release_tag }}"
+          
+          if ([string]::IsNullOrEmpty($osType)) { $osType = "windows-latest" }
+          if ([string]::IsNullOrEmpty($pyVer)) { $pyVer = "3.10" }
+          if ([string]::IsNullOrEmpty($cudaVer)) { $cudaVer = "12.1.1" }
+          if ([string]::IsNullOrEmpty($relTag)) { $relTag = "basic" }
+          
+          # 打印输入参数信息
+          Write-Output "=== 构建参数信息 ==="
+          Write-Output "操作系统类型: $osType"
+          Write-Output "Python版本: $pyVer"
+          Write-Output "CUDA版本: $cudaVer"
+          Write-Output "发布标签: $relTag"
+          Write-Output "===================="
+          
           $matrix = @{
-              'os' = @('windows-latest')
-              'pyver' = @("3.10")
-              'cuda' = @("12.1.1") #, "12.5.1", "12.6.1")
-              'releasetag' = @("basic")
+              'os' = @($osType)
+              'pyver' = @($pyVer)
+              'cuda' = @($cudaVer)
+              'releasetag' = @($relTag)
           }
 
           $matrixOut = ConvertTo-Json $matrix -Compress
