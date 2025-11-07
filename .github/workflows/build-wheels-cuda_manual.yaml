@@ -1,220 +1,511 @@
-name: Build Wheels (CUDA) Manual
-
-permissions:
-  contents: write
+name: Build Wheels (CUDA)
 
 on:
   workflow_dispatch:
     inputs:
-      cuda_version:
-        description: 'CUDA version'
+      os:
+        description: 'Operating systems to build on, ubuntu-22.04, windows-latest'
         required: true
-        default: '12.1.1'
+        default: 'windows-latest'
         type: string
-      python_version:
-        description: 'Python version'
+      pyver:
+        description: 'Python versions (comma-separated)'
         required: true
         default: '3.10'
         type: string
-      os_type:
-        description: 'Operating System'
+      cuda:
+        description: 'CUDA versions (comma-separated)'
         required: true
-        default: 'windows-latest'
-        type: choice
-        options:
-          - 'windows-latest'
-          - 'ubuntu-latest'
-      release_tag:
-        description: 'Release tag'
+        default: '12.4.1'
+        type: string
+      releasetag:
+        description: 'Release tags (comma-separated)'
         required: true
         default: 'basic'
         type: string
+      version:
+        description: '自定义版本：若为 commit、tag、version 则自动获取'
+        default: 'commit'
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  define_matrix:
-    name: Define Build Matrix
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    defaults:
-      run:
-        shell: pwsh
-
-    steps:
-      - name: Define Job Output
-        id: set-matrix
-        run: |
-          $osType = "${{ github.event.inputs.os_type }}"
-          $pyVer = "${{ github.event.inputs.python_version }}"
-          $cudaVer = "${{ github.event.inputs.cuda_version }}"
-          $relTag = "${{ github.event.inputs.release_tag }}"
-          
-          if ([string]::IsNullOrEmpty($osType)) { $osType = "windows-latest" }
-          if ([string]::IsNullOrEmpty($pyVer)) { $pyVer = "3.10" }
-          if ([string]::IsNullOrEmpty($cudaVer)) { $cudaVer = "12.1.1" }
-          if ([string]::IsNullOrEmpty($relTag)) { $relTag = "basic" }
-          
-          # 打印输入参数信息
-          Write-Output "=== 构建参数信息 ==="
-          Write-Output "操作系统类型: $osType"
-          Write-Output "Python版本: $pyVer"
-          Write-Output "CUDA版本: $cudaVer"
-          Write-Output "发布标签: $relTag"
-          Write-Output "===================="
-          
-          $matrix = @{
-              'os' = @($osType)
-              'pyver' = @($pyVer)
-              'cuda' = @($cudaVer)
-              'releasetag' = @($relTag)
-          }
-
-          $matrixOut = ConvertTo-Json $matrix -Compress
-          Write-Output ('matrix=' + $matrixOut) >> $env:GITHUB_OUTPUT
-
   build_wheels:
-    name: Build Wheel ${{ matrix.os }} ${{ matrix.pyver }} ${{ matrix.cuda }} ${{ matrix.releasetag == 'wheels' && 'AVX2' || matrix.releasetag }}
-    needs: define_matrix
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix: ${{ fromJSON(needs.define_matrix.outputs.matrix) }}
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      CUDAVER: ${{ matrix.cuda }}
-      AVXVER: ${{ matrix.releasetag }}
+    name: Build Wheel ${{ inputs.os }} ${{ inputs.pyver }} ${{ inputs.cuda }} ${{ inputs.releasetag == 'wheels' && 'AVX2' || inputs.releasetag }}
+    runs-on: ${{ inputs.os }}
 
     steps:
-      - name: Setup MSVC
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+      # - name: Add MSBuild to PATH
+      #   if: runner.os == 'Windows'
+      #   uses: microsoft/setup-msbuild@v2
+      #   with:
+        #     vs-version: '[16.11,16.12)'
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: "recursive"
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.pyver }}
+          python-version: ${{ inputs.pyver }}
           cache: 'pip'
-
-      - name: Setup Mamba
-        uses: conda-incubator/setup-miniconda@v3.1.0
-        with:
-          activate-environment: "llamacpp"
-          python-version: ${{ matrix.pyver }}
-          miniforge-version: latest
-          add-pip-as-python-dependency: true
-          auto-activate-base: false
-
-      - name: VS Integration Cache
-        id: vs-integration-cache
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: ./MSBuildExtensions
-          key: cuda-${{ matrix.cuda }}-vs-integration
-
-      - name: Get Visual Studio Integration
-        if: runner.os == 'Windows' && steps.vs-integration-cache.outputs.cache-hit != 'true'
+      
+      - name: Install Python Dependencies
         run: |
-          if ($env:CUDAVER -eq '12.1.1') {
-              $x = '12.1.0'
-          } else {
-              $x = $env:CUDAVER
-          }
-          
-          $links = (Invoke-RestMethod 'https://raw.githubusercontent.com/Jimver/cuda-toolkit/master/src/links/windows-links.ts').Trim().split().where({$_ -ne ''})
-          for ($i=$q=0; $i -lt $links.count -and $q -lt 2; $i++) {
-              if ($links[$i] -eq "'$x',") {
-                  $q++
-              }
-          }
-          
-          $downloadUrl = $links[$i].Trim("'")
-          Write-Output "Downloading CUDA integration from: $downloadUrl"
-          
-          Invoke-RestMethod $downloadUrl -OutFile 'cudainstaller.zip'
-          & 'C:\Program Files\7-Zip\7z.exe' e cudainstaller.zip -oMSBuildExtensions -r *\MSBuildExtensions\* > $null
-          Remove-Item 'cudainstaller.zip'
-
-      - name: Install Visual Studio Integration
+          python -m pip install --upgrade pip
+          pip install wheel build setuptools scikit-build-core cmake ninja
+        
+      - name: Set VS 2022
         if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-vsdevenv@master
+        
+      - name: Setup Visual Studio Environment
+        if: runner.os == 'Windows'
+        shell: python
         run: |
-          # 动态查找 Visual Studio BuildCustomizations 目录
-          $vsPath = vswhere -latest -property installationPath
-          if (-not $vsPath) {
-              Write-Error "Visual Studio installation not found"
-              exit 1
-          }
+          import os
+          import subprocess
+          import glob
           
-          # 查找 BuildCustomizations 目录
-          $buildCustomizations = Get-ChildItem -Path "$vsPath\MSBuild\Microsoft\VC" -Recurse -Directory -Filter "BuildCustomizations" | Select-Object -First 1
-          if (-not $buildCustomizations) {
-              Write-Error "BuildCustomizations directory not found in Visual Studio installation"
-              exit 1
-          }
+          def normalize_path(path):
+              """Convert Windows paths to forward slashes to avoid escape sequence issues"""
+              return os.path.normpath(path).replace('\\', '/')
           
-          # 复制文件
-          $sourceDir = (Get-Item '.\MSBuildExtensions').FullName
-          Copy-Item "$sourceDir\*" $buildCustomizations.FullName -Force
-          Write-Output "Copied CUDA integration files to: $($buildCustomizations.FullName)"
+          # Common VS installation paths
+          vs_paths = [
+              r"C:\Program Files\Microsoft Visual Studio\2022\Enterprise",
+              r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise",
+          ]
           
-          # 设置 CUDA 环境变量
-          $cudaMainVersion = $env:CUDAVER.Substring(0, $env:CUDAVER.LastIndexOf('.'))
-          $cudaEnvVar = "CUDA_PATH_V" + $cudaMainVersion.Replace('.', '_')
-          Write-Output "$cudaEnvVar=$env:CONDA_PREFIX" >> $env:GITHUB_ENV
-          Write-Output "Set $cudaEnvVar=$env:CONDA_PREFIX"
+          vs_path = None
+          for path in vs_paths:
+              if os.path.exists(path):
+                  vs_path = path
+                  print(f'Found Visual Studio at: {normalize_path(vs_path)}')
+                  break
+          
+          if not vs_path:
+              print('ERROR: Visual Studio not found in common locations')
+              # Attempt to find using vswhere
+              try:
+                  vswhere_path = r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+                  if os.path.exists(vswhere_path):
+                      result = subprocess.run(
+                          [vswhere_path, "-latest", "-property", "installationPath"],
+                          capture_output=True,
+                          text=True,
+                          check=True
+                      )
+                      if result.stdout.strip():
+                          vs_path = result.stdout.strip()
+                          print(f'Found VS via vswhere: {normalize_path(vs_path)}')
+              except Exception as e:
+                  print(f'vswhere failed: {e}')
+          
+          if not vs_path:
+              print('FATAL: Cannot locate Visual Studio installation')
+              exit(1)
+          
+          # Find VC Tools
+          vc_paths = []
+          msvc_base = os.path.join(vs_path, 'VC', 'Tools', 'MSVC')
+          if os.path.exists(msvc_base):
+              vc_paths = [os.path.join(msvc_base, d) for d in os.listdir(msvc_base) 
+                         if os.path.isdir(os.path.join(msvc_base, d))]
+          
+          if not vc_paths:
+              # Check alternative paths
+              alt_paths = [
+                  r"C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC",
+                  r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"
+              ]
+              for path in alt_paths:
+                  if os.path.exists(path):
+                      vc_paths = [os.path.join(path, d) for d in os.listdir(path)
+                                 if os.path.isdir(os.path.join(path, d))]
+                      if vc_paths:
+                          break
+          
+          if not vc_paths:
+              print('ERROR: No VC Tools directories found')
+              exit(1)
+          
+          # Select latest VC Tools version
+          vc_tools_path = sorted(vc_paths)[-1]
+          print(f'Using VC Tools: {normalize_path(vc_tools_path)}')
+          
+          # Configure compiler paths
+          host_arch = 'x64'
+          target_arch = 'x64'
+          bin_path = os.path.join(vc_tools_path, 'bin', f'Host{host_arch}', target_arch)
+          
+          if not os.path.exists(bin_path):
+              print(f'ERROR: VC bin directory not found at: {normalize_path(bin_path)}')
+              # Try alternative path structure
+              alt_bin_path = os.path.join(vc_tools_path, 'bin', target_arch)
+              if os.path.exists(alt_bin_path):
+                  bin_path = alt_bin_path
+                  print(f'Using alternate bin path: {normalize_path(bin_path)}')
+              else:
+                  exit(1)
+          
+          # Normalize all paths
+          bin_path_norm = normalize_path(bin_path)
+          vs_path_norm = normalize_path(vs_path)
+          vc_tools_path_norm = normalize_path(vc_tools_path)
+          include_path = os.path.join(vc_tools_path_norm, 'include')
+          lib_path = os.path.join(vc_tools_path_norm, 'lib', 'x64')
+          
+          # Get and normalize current PATH
+          current_path = os.environ.get('PATH', '')
+          current_path_norm = ';'.join([normalize_path(p) for p in current_path.split(';') if p])
+          
+          # Write to GITHUB_ENV
+          github_env = os.environ.get('GITHUB_ENV', '')
+          if not github_env:
+              print('ERROR: GITHUB_ENV environment variable not set')
+              exit(1)
+          
+          print(f'Writing to GITHUB_ENV: {github_env}')
+          with open(github_env, 'a') as env_file:
+              env_file.write(f'PATH={bin_path_norm};{current_path_norm}\n')
+              env_file.write(f'VCINSTALLDIR={vs_path_norm}\n')
+              env_file.write(f'VCToolsInstallDir={vc_tools_path_norm}\n')
+              env_file.write(f'VS_PATH={vs_path_norm}\n')
+              env_file.write(f'VC_TOOLS_PATH={vc_tools_path_norm}\n')
+              env_file.write(f'VC_BIN_PATH={bin_path_norm}\n')
+              env_file.write(f'INCLUDE={include_path}\n')
+              env_file.write(f'LIB={lib_path}\n')
+          
+          print("Visual Studio environment variables configured")
+          print(fr'PATH updated with: {bin_path_norm}')
+          print(fr'INCLUDE set to: {include_path}')
+          print(fr'LIB set to: {lib_path}')
+          
+          # Verify cl.exe with proper environment
+          try:
+              # Create a temporary environment with the new variables
+              test_env = os.environ.copy()
+              test_env['PATH'] = f'{bin_path_norm};{current_path_norm}'
+              test_env['INCLUDE'] = include_path
+              test_env['LIB'] = lib_path
+              
+              # Use a simple test that doesn't require input files
+              result = subprocess.run(
+                  ['cl.exe', '/nologo', '/help'],
+                  env=test_env,
+                  capture_output=True,
+                  text=True,
+                  check=True
+              )
+              print('Compiler test passed successfully')
+              print(f'Compiler version: {result.stdout.splitlines()[0]}')
+          except subprocess.CalledProcessError as e:
+              print(f'Compiler test FAILED with exit code {e.returncode}')
+              print(f'STDOUT: {e.stdout}')
+              print(f'STDERR: {e.stderr}')
+              # Additional diagnostics
+              print('\nDiagnostic checks:')
+              print(fr'cl.exe path: {os.path.join(bin_path, "cl.exe")}')
+              print(fr'File exists: {os.path.exists(os.path.join(bin_path, "cl.exe"))}')
+              print(fr'INCLUDE path exists: {os.path.exists(include_path)}')
+              print(fr'LIB path exists: {os.path.exists(lib_path)}')
+              exit(1)
+          except Exception as e:
+              print(f'Unexpected error during compiler test: {str(e)}')
+              exit(1)
 
-      - name: Install Dependencies
+      - name: Install CUDA and Dependencies
+        if: runner.os == 'Windows'
+        shell: bash  
         env:
-          MAMBA_DOWNLOAD_FAILFAST: "0"
-          MAMBA_NO_LOW_SPEED_LIMIT: "1"
+          CUDAVER: ${{ inputs.cuda }}
         run: |
-          $cudaVersion = $env:CUDAVER
-          mamba install -y 'cuda' -c nvidia/label/cuda-$cudaVersion
+          python -m pip install --upgrade pip
+          pip install requests build wheel
           
-          # 关键修复：安装新版CMake
-          mamba install -y cmake=3.29.4
+          python -c "
+          import os
+          import sys
+          import subprocess
+          import requests
+          import re
+          import glob
+          from pathlib import Path
           
-          python -m pip install build wheel
-          python -m pip install --force-reinstall scikit-build-core
+          cuda_version = os.getenv('CUDAVER')
+          print(f'Downloading CUDA {cuda_version} components...')
+          
+          # 版本映射
+          x = '12.1.0' if cuda_version == '12.1.1' else cuda_version
+          
+          # 获取下载链接
+          url = 'https://raw.githubusercontent.com/Jimver/cuda-toolkit/master/src/links/windows-links.ts'
+          response = requests.get(url, timeout=10)
+          response.raise_for_status()
+          
+          # 解析链接
+          links = re.findall(r\"'[^']+'\", response.text)
+          links = [link.strip(\"'\") for link in links if link.strip(\"'\")]
+          
+          # 查找下载URL (匹配版本两次)
+          target_quote = f\"'{x}',\"
+          q = 0
+          download_url = None
+          for i in range(len(links) - 1):
+              if f\"'{links[i]}',\" == target_quote:
+                  q += 1
+                  if q == 2 and i + 1 < len(links):
+                      download_url = links[i + 1]
+                      break
+          
+          if not download_url:
+              raise RuntimeError(f'Could not find download link for CUDA {x}')
+          
+          # 下载安装程序
+          installer_path = Path('cuda_installer.exe')
+          if not installer_path.exists():
+              print(f'Downloading CUDA installer from {download_url}')
+              with requests.get(download_url, stream=True) as r:
+                  r.raise_for_status()
+                  with open(installer_path, 'wb') as f:
+                      for chunk in r.iter_content(8192):
+                          f.write(chunk)
+          
+          # 安装CUDA
+          print('Installing CUDA toolkit...')
+          install_cmd = [str(installer_path), '-s', '-n', '-c1', '-c2', '-c3', '-c4', '-o']
+          try:
+              subprocess.run(install_cmd, check=True, shell=True)
+          except subprocess.CalledProcessError:
+              print('Fallback to basic installation')
+              subprocess.run([str(installer_path), '-s'], check=True, shell=True)
+          
+          # 准备VS集成
+          output_dir = Path('MSBuildExtensions')
+          output_dir.mkdir(exist_ok=True)
+          
+          # 保存关键路径到临时文件
+          cuda_base = r'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA'
+          cuda_path = next(
+              (p for p in Path(cuda_base).glob(f'v{cuda_version.split(\".\")[0]}.{cuda_version.split(\".\")[1]}*') if p.is_dir()),
+              None
+          )
+          
+          if not cuda_path:
+              raise RuntimeError(f'CUDA installation not found in {cuda_base}')
+          
+          # 保存路径信息
+          env_data = {
+              'cuda_path': str(cuda_path),
+              'cuda_version': cuda_version,
+              'vs_path': os.environ.get('VS_PATH', r'C:/Program Files/Microsoft Visual Studio/2022/Enterprise')
+          }
+          
+          with open('cuda_env.json', 'w') as f:
+              import json
+              json.dump(env_data, f)
+          
+          print('Installation completed successfully')
+          "
+
+      - name: Configure CUDA Environment
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os
+          import json
+          import sys
+          from pathlib import Path
+          
+          # 读取安装步骤保存的路径信息
+          with open('cuda_env.json') as f:
+              env_data = json.load(f)
+          
+          cuda_path = env_data['cuda_path']
+          cuda_version = env_data['cuda_version']
+          vs_path = env_data['vs_path']
+          
+          print(f"Configuring environment for CUDA {cuda_version} at {cuda_path}")
+          
+          # 查找关键路径
+          cuda_bin = os.path.join(cuda_path, 'bin')
+          cuda_lib = os.path.join(cuda_path, 'lib', 'x64')
+          cuda_inc = os.path.join(cuda_path, 'include')
+          nvcc_path = os.path.join(cuda_bin, 'nvcc.exe')
+          
+          # 查找VS编译器路径
+          cl_path = None
+          msvc_base = os.path.join(vs_path, 'VC', 'Tools', 'MSVC')
+          if os.path.exists(msvc_base):
+              msvc_vers = sorted([d for d in os.listdir(msvc_base) if os.path.isdir(os.path.join(msvc_base, d))], reverse=True)
+              if msvc_vers:
+                  cl_path = os.path.join(msvc_base, msvc_vers[0], 'bin', 'Hostx64', 'x64')
+          
+          # 规范化路径（解决Unicode转义问题）
+          norm = lambda p: os.path.normpath(p).replace('\\\\', '/').replace('\\', '/')
+          
+          norm_cuda_path = norm(cuda_path)
+          norm_cuda_bin = norm(cuda_bin)
+          norm_cuda_lib = norm(cuda_lib)
+          norm_cuda_inc = norm(cuda_inc)
+          norm_nvcc = norm(nvcc_path)
+          norm_cl = norm(cl_path) if cl_path else ''
+          
+          # 获取当前环境
+          current_path = os.environ.get("PATH", "")
+          current_lib = os.environ.get("LIB", "")
+          norm_current_path = current_path.replace('\\', '/')
+          norm_current_lib = current_lib.replace('\\', '/') if current_lib else ""
+          
+          # 准备CMake参数
+          cmake_args = [
+              "-DGGML_CUDA=on",
+              "-DCMAKE_CUDA_ARCHITECTURES=all",
+              "-DGGML_CUDA_FORCE_MMQ=ON",
+              "-DGGML_AVX2=off",
+              "-DGGML_FMA=off", 
+              "-DGGML_F16C=off",
+              f'-DCMAKE_CUDA_COMPILER="{norm_nvcc}"'
+          ]
+          
+          if norm_cl:
+              cl_exe = os.path.join(norm_cl, "cl.exe")
+              cmake_args.extend([
+                  f'-DCMAKE_C_COMPILER="{cl_exe}"',
+                  f'-DCMAKE_CXX_COMPILER="{cl_exe}"',
+                  # 移除CMAKE_CUDA_HOST_COMPILER，因为Visual Studio不支持此设置
+                  # f'-DCMAKE_CUDA_HOST_COMPILER="{cl_exe}"'
+              ])
+
+          cmake_args.extend([
+              f'-DCMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORY="{norm_cuda_inc}"',
+              f'-DCMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES="{norm_cuda_lib}"',
+              f'-DCMAKE_CUDA_TOOLKIT_ROOT_DIR="{norm_cuda_path}"',
+              # 添加MSBuild生成器设置，确保正确识别CUDA
+              '-G', '"Visual Studio 17 2022"',
+              '-A', 'x64'
+          ])
+          
+          # 检查CUDACompatibility.cmake文件是否存在
+          cuda_compat_path = os.path.join(norm_cuda_path, "include", "cmake", "CUDACompatibility.cmake")
+          if os.path.exists(cuda_compat_path):
+              cmake_args.append(f'-DCMAKE_TOOLCHAIN_FILE="{cuda_compat_path}"')
+              print(f"Found CUDA compatibility file at: {cuda_compat_path}")
+          else:
+              print(f"Warning: CUDA compatibility file not found at: {cuda_compat_path}")
+              print("Proceeding without CUDA compatibility file...")
+          
+          # 写入环境变量到GITHUB_ENV（供后续步骤使用）
+          # 工具链文件参数仅在文件存在时添加
+          github_env = os.environ["GITHUB_ENV"]
+          with open(github_env, "a") as env_file:
+              env_file.write(f"CUDA_PATH={norm_cuda_path}\n")
+              env_file.write(f"CUDA_HOME={norm_cuda_path}\n")
+              env_file.write(f"CUDA_TOOLKIT_ROOT_DIR={norm_cuda_path}\n")
+              env_file.write(f"CUDA_ROOT={norm_cuda_path}\n")
+              env_file.write(f"CUDA_BIN_PATH={norm_cuda_bin}\n")
+              env_file.write(f"CUDA_LIB_PATH={norm_cuda_lib}\n")
+              env_file.write(f"CUDA_INC_PATH={norm_cuda_inc}\n")
+
+              # 添加MSBuild需要的CudaToolkitDir变量
+              env_file.write(f"CudaToolkitDir={norm_cuda_path}\n")
+              env_file.write(f"PATH={norm_cuda_bin};{norm_current_path}\n")
+              
+              if norm_cuda_lib:
+                  env_file.write(f"LIB={norm_cuda_lib};{norm_current_lib}\n")
+              
+              env_file.write("VERBOSE=1\n")
+              env_file.write(f"CMAKE_ARGS={' '.join(cmake_args)}\n")
+              env_file.write(f"CL_PATH={norm_cl}\n")
+              env_file.write(f"NVCC_PATH={norm_nvcc}\n")
+              
+              # 保存CUDA版本供后续步骤使用
+              env_file.write(f"CUDA_VERSION={cuda_version}\n")
+          
+          print("\n=== CUDA Environment Configuration Complete ===")
+          print(f"  CUDA Version: {cuda_version}")
+          print(f"  CUDA Path: {norm_cuda_path}")
+          print(f"  Environment variables written to GITHUB_ENV for subsequent steps")
+          
+          # Print more environment variables for debugging
+          print("\n=== Detailed Environment Variable Check ===")
+          print(f"  CUDA_HOME={norm_cuda_path}")
+          print(f"  CUDA_TOOLKIT_ROOT_DIR={norm_cuda_path}")
+          print(f"  CUDA_ROOT={norm_cuda_path}")
+          print(f"  CUDA_BIN_PATH={norm_cuda_bin}")
+          print(f"  CUDA_LIB_PATH={norm_cuda_lib}")
+          print(f"  CUDA_INC_PATH={norm_cuda_inc}")
+          print(f"  CudaToolkitDir={norm_cuda_path}")
+          print(f"  VERBOSE=1")
+          print(f"  CL_PATH={norm_cl}")
+          print(f"  NVCC_PATH={norm_nvcc}")
+          
+          # Check if key paths exist
+          print("\n=== Path Existence Check ===")
+          print(f"  CUDA bin directory exists: {os.path.exists(cuda_bin)}")
+          print(f"  CUDA lib directory exists: {os.path.exists(cuda_lib)}")
+          print(f"  CUDA include directory exists: {os.path.exists(cuda_inc)}")
+          print(f"  NVCC.exe exists: {os.path.exists(nvcc_path)}")
+          if cl_path:
+            cl_exe = os.path.join(cl_path, "cl.exe")
+            print(f"  CL.exe exists: {os.path.exists(cl_exe)}")
+          
+          # Print complete CMAKE_ARGS
+          print("\n=== Complete CMAKE_ARGS ===")
+          print(f"  {' '.join(cmake_args)}")
+          
+          print("\n=== Environment configuration complete, ready to build ===")
 
       - name: Build Wheel
+        shell: powershell
         run: |
-          # 正确提取 CUDA 主版本 (12.1)
-          $cudaMainVersion = $env:CUDAVER.Substring(0, $env:CUDAVER.LastIndexOf('.'))
+          Write-Host "=== Starting Wheel Build ==="
           
-          # 设置环境变量
-          $env:CUDA_PATH = $env:CONDA_PREFIX
-          $env:CUDA_HOME = $env:CONDA_PREFIX
-          $env:CUDA_TOOLKIT_ROOT_DIR = $env:CONDA_PREFIX
+          # Get CUDA version from environment variables (set by Configure CUDA Environment step)
+          $CUDA_VERSION = "$env:CUDA_VERSION"
+          Write-Host "  Using CUDA version: $CUDA_VERSION"
           
-          # 配置 CMAKE 参数
-          $env:VERBOSE = '1'
-          $env:CMAKE_ARGS = '-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=70'
-          $env:CMAKE_ARGS = "-DGGML_CUDA_FORCE_MMQ=ON $env:CMAKE_ARGS"
-          $env:CMAKE_ARGS = $env:CMAKE_ARGS + ' -DGGML_AVX2=off -DGGML_FMA=off -DGGML_F16C=off'
+          # Get CUDA path from environment variables (set by Configure CUDA Environment step)
+          $CUDA_PATH = "$env:CUDA_PATH"
+          Write-Host "  Using CUDA path: $CUDA_PATH"
           
-          # 关键修复：设置新CMake路径
-          $env:PATH = "$env:CONDA_PREFIX\Library\bin;$env:PATH"
-          
-          # 验证工具链
-          Write-Output "--- TOOLCHAIN VERSIONS ---"
-          cmake --version
-          nvcc --version
-          
-          # 构建 wheel
+          # Build wheel (environment variables have been set in Configure CUDA Environment step)
+          Write-Host "  Starting wheel build..."
           python -m build --wheel
           
-          # 保存 CUDA 版本用于后续步骤
-          Write-Output "CUDA_VERSION=$cudaMainVersion" >> $env:GITHUB_ENV
-          Write-Output "Using CUDA version: $cudaMainVersion for tagging"
+          Write-Host "  Build complete"
 
-      - uses: softprops/action-gh-release@v2
+      - name: Determine Version
+        id: determine_version
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          case "$INPUT_VERSION" in
+            commit)
+              version="$(git rev-parse --short HEAD)"
+              ;;
+            tag)
+              version="git-$(git describe --tags --abbrev=0)"
+              ;;
+            version)
+              if [ -f VERSION ]; then
+                version=$(cat VERSION)
+              else
+                version="$INPUT_VERSION"
+              fi
+              ;;
+            *)
+              version="$INPUT_VERSION"
+              ;;
+          esac
+          echo "d_ver=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2.3.3
         with:
           files: dist/*
-          tag_name: ${{ github.ref_name }}-cu${{ env.CUDA_VERSION }}
+          tag_name: ${{ github.ref_name }}-${{ steps.determine_version.outputs.d_ver }}-py${{ inputs.pyver }}-cu${{ env.CUDA_VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
