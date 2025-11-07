@@ -7,7 +7,7 @@ on:
         description: 'Optional: Repository to checkout (e.g. JamePeng/llama-cpp-python). '
         required: false
         type: string
-        default: 'hJamePeng/llama-cpp-python'
+        default: 'JamePeng/llama-cpp-python'
       cuda_arch:
         description: 'CUDA architectures'
         required: true
