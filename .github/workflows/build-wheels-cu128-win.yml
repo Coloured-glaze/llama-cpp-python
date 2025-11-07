@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: 'Optional: Repository to checkout (e.g. JamePeng/llama-cpp-python). Uses current repo if not provided.'
+        description: 'Optional: Repository to checkout (e.g. JamePeng/llama-cpp-python). '
         required: false
         type: string
         default: 'hJamePeng/llama-cpp-python'
@@ -119,7 +119,7 @@ jobs:
 
       - name: Create Release
         if: always() && env.TAG_VERSION != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.3.3
         with:
           files: dist/*
           # Set tag_name to <tag>-cu<cuda_version>-<date>-win
