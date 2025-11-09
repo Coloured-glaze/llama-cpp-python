@@ -18,6 +18,11 @@ on:
         required: true
         default: '12.4.1'
         type: string
+      cuda_arch:
+        description: 'CUDA architectures | 50;70;75;80;86;87;89;90;100;101;120 or all'
+        required: true
+        default: '50;70;75;80;86;87;89;90;100;101;120'
+        type: string
       releasetag:
         description: 'Release tags (comma-separated)'
         required: true
@@ -364,11 +369,11 @@ jobs:
           # 准备CMake参数
           cmake_args = [
               "-DGGML_CUDA=on",
-              "-DCMAKE_CUDA_ARCHITECTURES=all",
+              "-DCMAKE_CUDA_ARCHITECTURES=${{inputs.cuda_arch}}",
               "-DGGML_CUDA_FORCE_MMQ=ON",
-              "-DGGML_AVX2=off",
-              "-DGGML_FMA=off", 
-              "-DGGML_F16C=off",
+              "-DGGML_AVX2=ON",
+              "-DGGML_FMA=OFF", 
+              "-DGGML_F16C=OFF",
               f'-DCMAKE_CUDA_COMPILER="{norm_nvcc}"'
           ]
           

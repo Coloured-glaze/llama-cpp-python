@@ -7,9 +7,14 @@ on:
         description: 'Optional: Repository to checkout (e.g. JamePeng/llama-cpp-python). '
         required: false
         type: string
-        default: 'hJamePeng/llama-cpp-python'
+        default: 'JamePeng/llama-cpp-python'
+      cuda_ver:
+        description: 'CUDA versions | 12.4.1 / 12.8.1'
+        required: true
+        default: '12.4.1'
+        type: string
       cuda_arch:
-        description: 'CUDA architectures'
+        description: 'CUDA architectures | 50;70'
         required: true
         default: '70-real;75-real;80-real;86-real;87-real;89-real;90-real;100-real;101-real;120-real'
         type: string
@@ -24,8 +29,8 @@ jobs:
     strategy:
       matrix:
         os: ['windows-2022']
-        pyver: ["3.10", "3.11", "3.12", "3.13"]
-        cuda: ["12.8.1"]
+        pyver: ["3.10", "3.11", "3.12"]
+        cuda: ["${{ inputs.cuda_ver }}"]
         releasetag: ["AVX2"]
         cudaarch: ["${{ inputs.cuda_arch }}"]
     defaults:
